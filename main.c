@@ -3,8 +3,8 @@
 #include <time.h>
 
 #include <log.h>
+#include <vec.h>
 
-#include "memory.h"
 #include "util.h"
 
 #define WORD_SIZE_MAX 64
@@ -43,52 +43,25 @@ bool is_digit(char c) {
 
 typedef struct Token {
   TokenType type;
-  //char *content;
   char content[WORD_SIZE_MAX + 1];
-  struct Token* next, * prev;
 } Token;
 
-Allocator* token_allocator;
+typedef vec_t(Token) token_vec_t;
 
-Token* new_token(TokenType type, char* content) {
-  Token* result = allocator_get(token_allocator, 1);
-  result->type = type;
+Token new_token(TokenType type, char* content) {
+  Token result;
+  result.type = type;
   size_t length = strlen(content);
-  //result->content = malloc(length + 1);
-  strncpy(result->content, content, length + 1);
-  result->prev = result->next = NULL;
+  strncpy(result.content, content, length);
+  result.content[length] = 0;
   return result;
 }
 
-Token* add_token(Token* t1, Token* t2) {
-  if (t2 == NULL) log_error("t2 is NULL");
-  if (t1 == NULL) return t2;
-  t1->next = t2;
-  t2->prev = t1;
-  return t2;
-}
-
-void free_token(Token* token) {
-  Token* ptr = token;
-  if (ptr == NULL)       log_error("Token is NULL");
-  if (ptr->prev != NULL) log_error("Didn't provide first Token");
-
-  while (ptr != NULL) {
-    //free(ptr->content);
-    Token* next = ptr->next;
-    free(ptr);
-    ptr = next;
-  }
-}
-
-void print(Token* token) {
-  Token* ptr = token;
-  if (ptr == NULL)       log_error("Token is NULL");
-  if (ptr->prev != NULL) log_error("Didn't provide first Token");
-
-  while (ptr != NULL) {
-    printf("%s(%s)\n", TokenType_to_s(ptr->type), ptr->content);
-    ptr = ptr->next;
+void print(token_vec_t t) {
+  int i;
+  Token val;
+  vec_foreach(&t, val, i) {
+    printf("%s(%s)\n", TokenType_to_s(val.type), val.content);
   }
 }
 
@@ -115,10 +88,11 @@ long read_file(const char* filename, char** buffer) {
   return read;
 }
 
-Token* lex(const char* file, size_t size) {
+token_vec_t lex(const char* file, size_t size) {
   LexState state = LEX_NONE;
 
-  Token* result = NULL, * current = NULL;
+  token_vec_t result;
+  vec_init(&result);
 
   size_t begin, end;
 
@@ -130,9 +104,9 @@ Token* lex(const char* file, size_t size) {
     case LEX_PAR_OPEN:
     case LEX_PAR_CLOSE:
       if (state == LEX_PAR_OPEN)
-        current = add_token(current, new_token(TOKEN_PAR_OPEN, ""));
+        vec_push(&result, new_token(TOKEN_PAR_OPEN, ""));
       if (state == LEX_PAR_CLOSE)
-        current = add_token(current, new_token(TOKEN_PAR_CLOSE, ""));
+        vec_push(&result, new_token(TOKEN_PAR_CLOSE, ""));
       if (c == '(') {
         state = LEX_PAR_OPEN;
       }
@@ -168,10 +142,10 @@ Token* lex(const char* file, size_t size) {
         static char str[WORD_SIZE_MAX + 1];
         strncpy(str, file + begin, length);
         str[length] = 0;
-        Token* token = NULL;
+        Token token;
         if (state == LEX_WORD)   token = new_token(TOKEN_WORD, str);
         if (state == LEX_NUMBER) token = new_token(TOKEN_NUMBER, str);
-        current = add_token(current, token);
+        vec_push(&result, token);
         //free(str);
 
         if (is_whitespace(c)) state = LEX_WHITESPACE;
@@ -181,10 +155,7 @@ Token* lex(const char* file, size_t size) {
       break;
     }
 
-    if (result == NULL && current != NULL)
-      result = current;
-
-    log_trace("%c %s", c, LexState_to_s(state), current == NULL ? 0 : 1);
+    log_trace("%c", c, LexState_to_s(state));
   }
 
   return result;
@@ -194,27 +165,15 @@ int main(int argc, char** argv) {
   log_set_level(LOG_DEBUG);
 
   for (int i = 0; i < 10; i++) {
-    token_allocator = allocator_new(sizeof(Token), 1);
-
     clock_t timer = clock();
 
     char* file;
-    size_t size = read_file("parse1/test2", &file);
+    size_t size = read_file("parse1/test3", &file);
     printf("read_file %f seconds\n", (double)(clock() - timer) / CLOCKS_PER_SEC);
     timer = clock();
 
-    Token* t = lex(file, size);
+    token_vec_t t = lex(file, size);
     printf("lex       %f seconds\n", (double)(clock() - timer) / CLOCKS_PER_SEC);
-    timer = clock();
-
-    Token* ptr = t;
-    int count = 0;
-    while (ptr != NULL) {
-      ptr = ptr->next;
-      count++;
-    }
-    printf("%d\n", count);
-    printf("test      %f seconds\n", (double)(clock() - timer) / CLOCKS_PER_SEC);
     timer = clock();
 
     free(file);
@@ -222,9 +181,7 @@ int main(int argc, char** argv) {
 
     //Program program = parse(t);
 
-    //free_token(t);
-
-    allocator_free(token_allocator);
+    vec_deinit(&t);
   }
 
   return 0;
