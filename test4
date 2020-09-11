@@ -1,0 +1,17 @@
+op ('if cond then) (
+)
+op (a '< b) (
+)
+op (a '= b) (
+)
+fn (len l) (
+)
+
+if (a < 60) (
+  b = (1 2 3)
+  if (len(b) < 5) (
+    c = 12345
+  )
+)
+
+if true print("Hello")
