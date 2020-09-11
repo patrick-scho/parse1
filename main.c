@@ -3,18 +3,20 @@
 #include <time.h>
 
 #include <log.h>
-#include <vec.h>
 
+#include "memory.h"
 #include "util.h"
 
 #define WORD_SIZE_MAX 64
 
 #define SOME_ENUM(X) \
     X(TOKEN_WORD,) \
-    X(TOKEN_STRING,) \
-    X(TOKEN_NUMBER,) \
+    X(TOKEN_STRING_LIT,) \
+    X(TOKEN_NUMBER_LIT,) \
+    X(TOKEN_BOOLEAN_LIT,) \
     X(TOKEN_PAR_OPEN,) \
     X(TOKEN_PAR_CLOSE,) \
+    X(TOKEN_SYMBOL,) \
 
 DEF_ENUM(TokenType, SOME_ENUM)
 
@@ -22,12 +24,27 @@ DEF_ENUM(TokenType, SOME_ENUM)
     X(LEX_NONE,) \
     X(LEX_WHITESPACE,) \
     X(LEX_WORD,) \
-    X(LEX_STRING,) \
-    X(LEX_NUMBER,) \
+    X(LEX_STRING_LIT,) \
+    X(LEX_NUMBER_LIT,) \
+    X(LEX_BOOLEAN_LIT,) \
     X(LEX_PAR_OPEN,) \
     X(LEX_PAR_CLOSE,) \
+    X(LEX_SYMBOL,) \
 
 DEF_ENUM(LexState, SOME_ENUM)
+
+#define SOME_ENUM(X) \
+    X(EXPR_LIST,) \
+    X(EXPR_SYM,) \
+    X(EXPR_QUOTE,) \
+    X(EXPR_ID,) \
+    X(EXPR_STRING_LIT,) \
+    X(EXPR_NUMBER_LIT,) \
+    X(EXPR_BOOLEAN_LIT,) \
+    X(EXPR_OP_CALL,) \
+    X(EXPR_FN_CALL,) \
+
+DEF_ENUM(ExprType, SOME_ENUM)
 
 bool is_whitespace(char c) {
   return
@@ -46,22 +63,45 @@ typedef struct Token {
   char content[WORD_SIZE_MAX + 1];
 } Token;
 
-typedef vec_t(Token) token_vec_t;
+//typedef struct Op {
+//} Op;
+//
+//typedef struct Fn {
+//} Fn;
+//
+//typedef struct Var {
+//} Var;
+//
+//typedef struct Expr {
+//  ExprType type;
+//  Expr children;
+//  size_t index, next;
+//} Expr;
+//
+//typedef struct Context {
+//  Op ops;
+//  Fn fns;
+//  Var vars;
+//  Expr exprs;
+//} Context;
+//
+//typedef struct Program {
+//  Context* main;
+//} Program;
 
-Token new_token(TokenType type, char* content) {
-  Token result;
-  result.type = type;
+void new_token(Allocator* allocator, TokenType type, char* content) {
+  size_t index = allocator_get(allocator, 1);
+  Token* result = allocator_at(allocator, index);
+  result->type = type;
   size_t length = strlen(content);
-  strncpy(result.content, content, length);
-  result.content[length] = 0;
-  return result;
+  strncpy(result->content, content, length);
+  result->content[length] = 0;
 }
 
-void print(token_vec_t t) {
-  int i;
-  Token val;
-  vec_foreach(&t, val, i) {
-    printf("%s(%s)\n", TokenType_to_s(val.type), val.content);
+void print(Allocator* allocator) {
+  for (size_t i = 0; i < allocator->count; i++) {
+    Token* val = allocator_at(allocator, i);
+    printf("%s(%s)\n", TokenType_to_s(val->type), val->content);
   }
 }
 
@@ -88,13 +128,10 @@ long read_file(const char* filename, char** buffer) {
   return read;
 }
 
-token_vec_t lex(const char* file, size_t size) {
+void lex(const char* file, size_t size, Allocator* result) {
   LexState state = LEX_NONE;
 
-  token_vec_t result;
-  vec_init(&result);
-
-  size_t begin, end;
+  size_t begin;
 
   for (size_t i = 0; i < size; i++) {
     char c = file[i];
@@ -104,9 +141,9 @@ token_vec_t lex(const char* file, size_t size) {
     case LEX_PAR_OPEN:
     case LEX_PAR_CLOSE:
       if (state == LEX_PAR_OPEN)
-        vec_push(&result, new_token(TOKEN_PAR_OPEN, ""));
+        new_token(result, TOKEN_PAR_OPEN, "");
       if (state == LEX_PAR_CLOSE)
-        vec_push(&result, new_token(TOKEN_PAR_CLOSE, ""));
+        new_token(result, TOKEN_PAR_CLOSE, "");
       if (c == '(') {
         state = LEX_PAR_OPEN;
       }
@@ -120,69 +157,81 @@ token_vec_t lex(const char* file, size_t size) {
           }
           else
             if (is_digit(c) || ((c == '+' || c == '-') && is_digit(file[i + 1]))) {
-              state = LEX_NUMBER;
+              state = LEX_NUMBER_LIT;
               begin = i;
             }
             else
               if (c == '"') {
-                state = LEX_STRING;
-                begin = i;
+                state = LEX_STRING_LIT;
+                begin = i + 1;
               }
-              else {
-                state = LEX_WORD;
-                begin = i;
-              }
+              else
+                if (c == '\'') {
+                  state = LEX_SYMBOL;
+                  begin = i + 1;
+                }
+                else {
+                  state = LEX_WORD;
+                  begin = i;
+                }
       break;
     case LEX_WORD:
-    case LEX_NUMBER:
+    case LEX_NUMBER_LIT:
+    case LEX_SYMBOL:
       if (is_whitespace(c) || c == '(' || c == ')') {
         size_t length = i - begin;
         if (length > WORD_SIZE_MAX) length = WORD_SIZE_MAX;
-        //char *str = malloc(length + 1);
         static char str[WORD_SIZE_MAX + 1];
         strncpy(str, file + begin, length);
         str[length] = 0;
-        Token token;
-        if (state == LEX_WORD)   token = new_token(TOKEN_WORD, str);
-        if (state == LEX_NUMBER) token = new_token(TOKEN_NUMBER, str);
-        vec_push(&result, token);
-        //free(str);
+        if (state == LEX_WORD)   new_token(result, TOKEN_WORD, str);
+        if (state == LEX_NUMBER_LIT) new_token(result, TOKEN_NUMBER_LIT, str);
+        if (state == LEX_SYMBOL) new_token(result, TOKEN_SYMBOL, str);
 
         if (is_whitespace(c)) state = LEX_WHITESPACE;
         if (c == '(')         state = LEX_PAR_OPEN;
         if (c == ')')         state = LEX_PAR_CLOSE;
       }
       break;
+    case LEX_STRING_LIT:
+      if (c == '"') {
+        size_t length = i - begin;
+        if (length > WORD_SIZE_MAX) length = WORD_SIZE_MAX;
+        static char str[WORD_SIZE_MAX + 1];
+        strncpy(str, file + begin, length);
+        str[length] = 0;
+        new_token(result, TOKEN_STRING_LIT, str);
+
+        state = LEX_NONE;
+
+      }
+      break;
     }
-
-    log_trace("%c", c, LexState_to_s(state));
   }
-
-  return result;
 }
+
+//Program* parse(Allocator* t, Allocator* p) {
+//  return NULL;
+//}
 
 int main(int argc, char** argv) {
   log_set_level(LOG_DEBUG);
 
-  for (int i = 0; i < 10; i++) {
-    clock_t timer = clock();
+  char* file;
+  size_t size = read_file("parse1/test4", &file);
 
-    char* file;
-    size_t size = read_file("parse1/test3", &file);
-    printf("read_file %f seconds\n", (double)(clock() - timer) / CLOCKS_PER_SEC);
-    timer = clock();
+  Allocator* t = allocator_new(sizeof(Token), 1024);
+  lex(file, size, t);
 
-    token_vec_t t = lex(file, size);
-    printf("lex       %f seconds\n", (double)(clock() - timer) / CLOCKS_PER_SEC);
-    timer = clock();
+  free(file);
 
-    free(file);
-    //print(t);
+  print(t);
 
-    //Program program = parse(t);
+  Allocator* p = allocator_new(1, 1024);
+  //Program* prg = parse(t, p);
 
-    vec_deinit(&t);
-  }
+  allocator_free(p);
+  allocator_free(t);
 
   return 0;
 }

@@ -20,15 +20,24 @@ void allocator_free(Allocator* allocator) {
 }
 
 void allocator_resize(Allocator* allocator, size_t new_capacity) {
-  allocator->data = realloc(allocator->data, new_capacity * allocator->size);
-  if (allocator->data == NULL)
+  void* ptr = realloc(allocator->data, new_capacity * allocator->size);
+  if (ptr == NULL)
     log_error("Failed to reallocate memory");
+  allocator->data = ptr;
   allocator->capacity = new_capacity;
 }
 
-void* allocator_get(Allocator* allocator, size_t count) {
+size_t allocator_get(Allocator* allocator, size_t count) {
   if (allocator->count + count > allocator->capacity)
     allocator_resize(allocator, allocator->capacity * 2);
   allocator->count += count;
-  return (void*)&allocator->data[(allocator->count - count) * allocator->size];
+  return allocator->count - count;
+}
+
+void* allocator_at(Allocator* allocator, size_t index) {
+  if (index >= allocator->count) {
+    log_error("Invalid index");
+    return NULL;
+  }
+  return &allocator->data[index * allocator->size];
 }

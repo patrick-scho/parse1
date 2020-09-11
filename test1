@@ -1,11 +1,15 @@
-i1 = +55
+i1 = +55.43
 i2 = -123
 
 i3 = i1 + i2
 
-fn f1(p1 p2) (
+fn f1(p1:i32, p2:i32) (
   p1 + p2 * p1 * p2
 )
 
 i4 = f1(i1 i3)
 
+i5 = "Hallo
+
+gesge
+"
